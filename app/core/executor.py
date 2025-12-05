@@ -138,10 +138,21 @@ class CodeExecutor:
                     # Build command to execute
                     # First file is the main file to execute
                     main_file = request.files[0].name
-                    cmd_inside = runtime_cmd + [main_file] + (request.args or [])
                     
                     # Check if bubblewrap is working
                     use_bwrap = self.sandbox_manager.check_bubblewrap_working()
+                    
+                    # Adjust runtime command path for sandbox
+                    if use_bwrap and settings.packages_dir.startswith('/app/'):
+                        # Replace /app/packages with /packages in runtime command
+                        adjusted_runtime_cmd = [
+                            cmd.replace(settings.packages_dir, '/packages') 
+                            for cmd in runtime_cmd
+                        ]
+                    else:
+                        adjusted_runtime_cmd = runtime_cmd
+                    
+                    cmd_inside = adjusted_runtime_cmd + [main_file] + (request.args or [])
                     
                     if use_bwrap:
                         # Build sandboxed command with bubblewrap

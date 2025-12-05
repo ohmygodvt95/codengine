@@ -93,6 +93,14 @@ class SandboxManager:
         Returns:
             Complete command list for bubblewrap execution
         """
+        # Determine the packages mount point inside the sandbox
+        # If packages_dir starts with /app, mount it elsewhere to avoid conflict with workdir
+        packages_src = settings.packages_dir
+        if packages_src.startswith('/app/'):
+            packages_dst = '/packages'
+        else:
+            packages_dst = packages_src
+        
         cmd = [
             "bwrap",
             # Bind essential system directories (read-only)
@@ -100,8 +108,17 @@ class SandboxManager:
             "--ro-bind", "/lib", "/lib",
             "--ro-bind", "/lib64", "/lib64",
             "--ro-bind", "/bin", "/bin",
-            # Bind runtime packages as read-only to the same path
-            "--ro-bind", settings.packages_dir, settings.packages_dir,
+        ]
+        
+        # Only bind packages_dir if it exists
+        if os.path.exists(packages_src):
+            cmd.extend(["--ro-bind", packages_src, packages_dst])
+        
+        # Bind DNS configuration for name resolution (only if internet enabled)
+        if internet_enabled and os.path.exists("/etc/resolv.conf"):
+            cmd.extend(["--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf"])
+        
+        cmd.extend([
             # Bind user code directory
             "--bind", workdir, "/app",
             # Set working directory
@@ -113,7 +130,7 @@ class SandboxManager:
             "--tmpfs", "/tmp",
             # Separate arguments from bind mounts
             "--"
-        ]
+        ])
 
         # Disable network if not allowed
         if not internet_enabled:

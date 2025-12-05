@@ -27,6 +27,8 @@ Models (app/models/schemas.py) + Config (app/config.py)
 
 **Runtime Management**: Runtimes stored in `/packages/{language}/{version}/bin/` structure. Version matching uses prefix-based fallback (e.g., "3.11" finds "3.11.9"). See `RuntimeManager.find_version_dir()`.
 
+**Container Path Handling**: When running in containers where PACKAGES_DIR starts with `/app/`, bubblewrap mounts packages to `/packages` inside sandbox to avoid path conflicts. Runtime commands are automatically adjusted in `execute_code()` to use the sandboxed path.
+
 **Resource Control**: Applied via `resource.setrlimit()` in `create_resource_limiter()` - works in both modes. Bubblewrap adds filesystem/network isolation on top.
 
 ## Development Workflow
@@ -99,11 +101,15 @@ Override via environment variables or `.env` file.
 2. `prepare_workspace()` writes all files from request
 3. Get runtime command via `RuntimeManager.get_runtime_command()`
 4. Check sandbox availability: `sandbox_manager.check_bubblewrap_working()`
-5. Build command: `build_bubblewrap_command()` or `build_direct_command()`
-6. Execute: `_run_sandboxed_process()` applies resource limits via `preexec_fn`
-7. Truncate outputs if needed before returning `ExecResult`
+5. Adjust runtime paths if in container (replace `/app/packages` → `/packages`)
+6. Build command: `build_bubblewrap_command()` or `build_direct_command()`
+7. Execute: `_run_sandboxed_process()` applies resource limits via `preexec_fn` and returns dict with metrics
+8. Collect metrics: wall_time, cpu_time, memory usage via `resource.getrusage()`
+9. Truncate outputs if needed before returning `ExecResult`
 
 **Important**: First file in `request.files` list is the main executable file.
+
+**Output Format**: Returns Piston-compatible format with nested `run` object containing stdout, stderr, output (combined), code, signal, cpu_time (ms), wall_time (ms), and memory (bytes).
 
 ### Bubblewrap Command Construction (app/core/sandbox.py)
 
@@ -116,6 +122,8 @@ bwrap --ro-bind /usr /usr --ro-bind /lib /lib
 ```
 
 The `--` separator is critical - it separates bwrap options from the command to execute.
+
+**Internet Access**: When `internet=True`, network namespace is shared and `/etc/resolv.conf` is bind-mounted for DNS resolution. When `internet=False` (default), `--unshare-net` isolates network completely.
 
 ### Output Truncation
 

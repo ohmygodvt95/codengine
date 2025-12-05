@@ -7,6 +7,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bubblewrap \
     ca-certificates \
     tzdata \
+    build-essential \
+    pkg-config \
+    wget curl ca-certificates \
+    openssl libssl-dev \
+    zlib1g-dev \
+    libncurses5-dev libncursesw5-dev \
+    libreadline-dev \
+    libsqlite3-dev \
+    libgdbm-dev \
+    libdb5.3-dev \
+    libbz2-dev \
+    libexpat1-dev \
+    liblzma-dev \
+    tk-dev \
+    libffi-dev \
+    uuid-dev \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
 # Allow bubblewrap (user namespace sandbox)
@@ -29,7 +45,11 @@ RUN pip install --no-cache-dir -r requirements.txt \
     && find /venv -name '*.pyc' -delete \
     && find /venv -type d -name '__pycache__' -delete
 
-COPY --chown=sandbox:sandbox . .
+COPY . .
+
+RUN cd /app/packages/python/3.10.0/ && ./build.sh 3.10.0
+
+RUN chown -R sandbox:sandbox /app
 
 USER sandbox
 
