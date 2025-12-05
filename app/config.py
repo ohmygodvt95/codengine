@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     
     # Server Settings
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 2000
     debug: bool = False
     
     # Execution Limits
@@ -27,11 +27,11 @@ class Settings(BaseSettings):
     
     # File Size Limits (in bytes)
     max_file_size: int = 1024 * 1024  # 1 MB per file
-    max_total_files_size: int = 5 * 1024 * 1024  # 5 MB total
+    max_total_files_size: int = 1 * 1024 * 1024  # 1 MB total
     max_files_count: int = 10  # Maximum number of files
     
     # Output Limits (in bytes)
-    max_output_size: int = 256 * 1024  # 256 KB for stdout
+    max_output_size: int = 512 * 1024  # 512 KB for stdout
     max_stderr_size: int = 256 * 1024  # 256 KB for stderr
     
     # Runtime Settings

@@ -38,9 +38,9 @@ class ExecRequest(BaseModel):
     files: List[File] = Field(..., min_items=1, description="List of files to execute")
     stdin: str = Field(default="", description="Standard input for the program")
     args: List[str] = Field(default_factory=list, description="Command-line arguments")
-    time_limit: float = Field(default=2.0, ge=0.1, le=30.0, description="Time limit in seconds")
+    time_limit: float = Field(default=90.0, ge=0.1, le=300.0, description="Time limit in seconds")
     memory_limit: int = Field(default=256, ge=32, le=2048, description="Memory limit in MB")
-    internet: bool = Field(default=False, description="Enable internet access in sandbox")
+    internet: bool = Field(default=True, description="Enable internet access in sandbox")
 
     @validator('language')
     def validate_language(cls, v):
@@ -70,11 +70,22 @@ class ExecRequest(BaseModel):
         return v
 
 
-class ExecResult(BaseModel):
-    """Result model for code execution."""
+class RunResult(BaseModel):
+    """Run result nested model."""
     stdout: str = Field(default="", description="Standard output")
     stderr: str = Field(default="", description="Standard error")
-    exit_code: int = Field(..., description="Exit code of the process")
-    time: float = Field(..., description="Execution time in seconds")
-    job_id: str = Field(..., description="Unique job identifier")
-    error: Optional[str] = Field(default=None, description="Error message if execution failed")
+    output: str = Field(default="", description="Combined stdout and stderr")
+    code: int = Field(..., description="Exit code of the process")
+    signal: Optional[str] = Field(default=None, description="Signal that terminated the process")
+    message: Optional[str] = Field(default=None, description="Error message if execution failed")
+    status: Optional[str] = Field(default=None, description="Status message")
+    cpu_time: Optional[int] = Field(default=None, description="CPU time in milliseconds")
+    wall_time: Optional[int] = Field(default=None, description="Wall time in milliseconds")
+    memory: Optional[int] = Field(default=None, description="Memory usage in bytes")
+
+
+class ExecResult(BaseModel):
+    """Result model for code execution."""
+    language: str = Field(..., description="Programming language")
+    version: str = Field(..., description="Language version")
+    run: RunResult = Field(..., description="Execution results")

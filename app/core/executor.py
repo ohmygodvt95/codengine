@@ -6,10 +6,11 @@ import time
 import uuid
 import tempfile
 import subprocess
+import resource
 from typing import Tuple
 import logging
 
-from app.models import ExecRequest, ExecResult
+from app.models import ExecRequest, ExecResult, RunResult
 from app.core.runtime import RuntimeManager
 from app.core.sandbox import SandboxManager
 from app.config import settings
@@ -100,6 +101,7 @@ class CodeExecutor:
         """
         job_id = str(uuid.uuid4())
         start_time = time.time()
+        cpu_start = time.process_time()
 
         try:
             # Get runtime command
@@ -111,12 +113,20 @@ class CodeExecutor:
             except (RuntimeNotFoundException, UnsupportedLanguageException) as e:
                 logger.error(f"Runtime error for job {job_id}: {str(e)}")
                 return ExecResult(
-                    stdout="",
-                    stderr="",
-                    exit_code=127,
-                    time=0.0,
-                    job_id=job_id,
-                    error=str(e)
+                    language=request.language,
+                    version=request.version,
+                    run=RunResult(
+                        stdout="",
+                        stderr="",
+                        output="",
+                        code=127,
+                        signal=None,
+                        message=str(e),
+                        status="error",
+                        cpu_time=0,
+                        wall_time=0,
+                        memory=None
+                    )
                 )
 
             # Create temporary workspace
@@ -150,7 +160,7 @@ class CodeExecutor:
                         logger.warning(f"Executing job {job_id}: {request.language} {request.version} (direct mode - bubblewrap unavailable)")
                     
                     # Execute with resource limits
-                    stdout, stderr, exit_code = self._run_sandboxed_process(
+                    result_data = self._run_sandboxed_process(
                         full_cmd,
                         workdir=workdir,
                         stdin_data=request.stdin,
@@ -162,54 +172,90 @@ class CodeExecutor:
                 except FileSystemException as e:
                     logger.error(f"Filesystem error for job {job_id}: {str(e)}")
                     return ExecResult(
-                        stdout="",
-                        stderr="",
-                        exit_code=1,
-                        time=0.0,
-                        job_id=job_id,
-                        error=str(e)
+                        language=request.language,
+                        version=request.version,
+                        run=RunResult(
+                            stdout="",
+                            stderr="",
+                            output="",
+                            code=1,
+                            signal=None,
+                            message=str(e),
+                            status="error",
+                            cpu_time=0,
+                            wall_time=0,
+                            memory=None
+                        )
                     )
                 except SandboxExecutionException as e:
                     logger.error(f"Sandbox error for job {job_id}: {str(e)}")
                     return ExecResult(
-                        stdout="",
-                        stderr=str(e),
-                        exit_code=1,
-                        time=0.0,
-                        job_id=job_id,
-                        error=str(e)
+                        language=request.language,
+                        version=request.version,
+                        run=RunResult(
+                            stdout="",
+                            stderr=str(e),
+                            output=str(e),
+                            code=1,
+                            signal=None,
+                            message=str(e),
+                            status="error",
+                            cpu_time=0,
+                            wall_time=0,
+                            memory=None
+                        )
                     )
 
             # Calculate execution time
-            elapsed = round(time.time() - start_time, 4)
+            wall_time_ms = int((time.time() - start_time) * 1000)
+            cpu_time_ms = int((time.process_time() - cpu_start) * 1000)
             
             # Truncate output if needed
-            stdout = self.truncate_output(stdout, settings.max_output_size, "stdout")
-            stderr = self.truncate_output(stderr, settings.max_stderr_size, "stderr")
+            stdout = self.truncate_output(result_data['stdout'], settings.max_output_size, "stdout")
+            stderr = self.truncate_output(result_data['stderr'], settings.max_stderr_size, "stderr")
             
-            logger.info(f"Job {job_id} completed with exit code {exit_code} in {elapsed}s")
+            # Combine stdout and stderr for output field
+            output = stdout if not stderr else (stdout + stderr if stdout else stderr)
+            
+            logger.info(f"Job {job_id} completed with exit code {result_data['exit_code']} in {wall_time_ms}ms")
             
             return ExecResult(
-                stdout=stdout,
-                stderr=stderr,
-                exit_code=exit_code,
-                time=elapsed,
-                job_id=job_id,
-                error=None
+                language=request.language,
+                version=request.version,
+                run=RunResult(
+                    stdout=stdout,
+                    stderr=stderr,
+                    output=output,
+                    code=result_data['exit_code'],
+                    signal=result_data.get('signal'),
+                    message=None,
+                    status=None,
+                    cpu_time=cpu_time_ms,
+                    wall_time=wall_time_ms,
+                    memory=result_data.get('memory')
+                )
             )
 
         except Exception as e:
             # Catch-all for unexpected errors
             logger.exception(f"Unexpected error for job {job_id}")
-            elapsed = round(time.time() - start_time, 4)
+            wall_time_ms = int((time.time() - start_time) * 1000)
             
             return ExecResult(
-                stdout="",
-                stderr="",
-                exit_code=1,
-                time=elapsed,
-                job_id=job_id,
-                error=f"Internal error: {str(e)}"
+                language=request.language,
+                version=request.version,
+                run=RunResult(
+                    stdout="",
+                    stderr="",
+                    output="",
+                    code=1,
+                    signal=None,
+                    message=f"Internal error: {str(e)}",
+                    status="error",
+                    cpu_time=0,
+                    wall_time=wall_time_ms,
+                    memory=None
+                )
             )
 
     def _run_sandboxed_process(
@@ -220,7 +266,7 @@ class CodeExecutor:
         memory_limit: int,
         time_limit: float,
         use_bwrap: bool = True
-    ) -> Tuple[str, str, int]:
+    ) -> dict:
         """
         Run a command in a sandboxed process with resource limits.
         
@@ -233,7 +279,7 @@ class CodeExecutor:
             use_bwrap: Whether bubblewrap is being used
             
         Returns:
-            Tuple of (stdout, stderr, exit_code)
+            Dictionary with stdout, stderr, exit_code, signal, memory
             
         Raises:
             SandboxExecutionException: If execution fails
@@ -262,12 +308,17 @@ class CodeExecutor:
             proc = subprocess.Popen(command, **process_args)
             
             # Communicate with timeout
+            signal_name = None
             try:
                 stdout, stderr = proc.communicate(
                     input=stdin_data,
                     timeout=time_limit + 0.5  # Add margin for cleanup
                 )
                 exit_code = proc.returncode
+                
+                # Check if process was terminated by signal
+                if exit_code < 0:
+                    signal_name = f"signal_{abs(exit_code)}"
                 
             except subprocess.TimeoutExpired:
                 # Kill process on timeout
@@ -279,6 +330,15 @@ class CodeExecutor:
                 
                 stderr = "TIMEOUT: Execution exceeded time limit\n" + stderr
                 exit_code = 124  # Standard timeout exit code
+                signal_name = "SIGKILL"
+            
+            # Try to get memory usage (rough estimate)
+            try:
+                rusage = resource.getrusage(resource.RUSAGE_CHILDREN)
+                # maxrss is in KB on Linux, convert to bytes
+                memory_bytes = rusage.ru_maxrss * 1024
+            except:
+                memory_bytes = None
                 
         except OSError as e:
             raise SandboxExecutionException(
@@ -289,4 +349,10 @@ class CodeExecutor:
                 f"Unexpected error during execution: {str(e)}"
             )
 
-        return stdout, stderr, exit_code
+        return {
+            'stdout': stdout,
+            'stderr': stderr,
+            'exit_code': exit_code,
+            'signal': signal_name,
+            'memory': memory_bytes
+        }

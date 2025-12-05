@@ -1,0 +1,7 @@
+services:
+  codengine:
+    build: .
+    container_name: codengine
+    ports:
+      - "2000:2000"
+    restart: unless-stopped
