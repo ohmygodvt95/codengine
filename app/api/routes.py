@@ -1,6 +1,7 @@
 """
 API route handlers.
 """
+import asyncio
 import logging
 import os
 from fastapi import APIRouter, HTTPException, status
@@ -65,7 +66,8 @@ async def execute(request: ExecRequest):
         ExecResult with execution output and metadata
     """
     try:
-        result = executor.execute_code(request)
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, executor.execute_code, request)
         return result
         
     except ValidationError as e:
