@@ -58,4 +58,4 @@ EXPOSE 2000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD wget -qO- http://127.0.0.1:2000/docs || exit 1
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "2000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "2000", "--workers", "4"]
